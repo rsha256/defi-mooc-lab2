@@ -131,12 +131,25 @@ interface IUniswapV2Pair {
 }
 
 // ----------------------IMPLEMENTATION------------------------------
+// @source This lab was completed in collaboration with Vikhyath Mondreti, Elden Ren, Aditya Prasad, and Samarth Goel, with the help of Victor Huang's guide on EdStem
 
 contract LiquidationOperator is IUniswapV2Callee {
     uint8 public constant health_factor_decimals = 18;
 
-    // TODO: define constants used in the contract including ERC-20 tokens, Uniswap Pairs, Aave lending pools, etc. */
+    // DTODO: define constants used in the contract including ERC-20 tokens, Uniswap Pairs, Aave lending pools, etc. */
     //    *** Your code here ***
+    uint public constant usdt_loan = 1816378221684; // og: 2916378221684
+    address target_address = 0x59CE4a2AC5bC3f5F225439B2993b86B42f6d3e9F;
+    address me = address(this);
+    address aave_addr = 0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9;
+    ILendingPool lending_pool = ILendingPool(aave_addr);
+    address USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    address WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
+    address WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    IUniswapV2Factory uniswp_factory = IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
+    IUniswapV2Pair uniswp_pair_usdt_weth = IUniswapV2Pair(uniswp_factory.getPair(USDT, WETH));
+    IUniswapV2Pair uniswp_pair_weth_wbtc = IUniswapV2Pair(uniswp_factory.getPair(WETH, WBTC));
+    uint public wbtc_amnt = 9427338222;
     // END TODO
 
     // some helper function, it is totally fine if you can finish the lab without using these function
@@ -178,21 +191,22 @@ contract LiquidationOperator is IUniswapV2Callee {
     }
 
     constructor() {
-        // TODO: (optional) initialize your contract
+        // DTODO: (optional) initialize your contract
         //   *** Your code here ***
-        // END TODO
+        // END DTODO
     }
 
-    // TODO: add a `receive` function so that you can withdraw your WETH
+    // DTODO: add a `receive` function so that you can withdraw your WETH
     //   *** Your code here ***
-    // END TODO
+    receive() external payable {}
+    // END DTODO
 
     // required by the testing script, entry for your liquidation call
     function operate() external {
         // TODO: implement your liquidation logic
 
         // 0. security checks and initializing variables
-        //    *** Your code here ***
+        //    *** Your code here *** 
 
         // 1. get the target user account data & make sure it is liquidatable
         //    *** Your code here ***
@@ -203,11 +217,15 @@ contract LiquidationOperator is IUniswapV2Callee {
         // we should borrow USDT, liquidate the target user and get the WBTC, then swap WBTC to repay uniswap
         // (please feel free to develop other workflows as long as they liquidate the target user successfully)
         //    *** Your code here ***
+        uniswp_pair_usdt_weth.swap(0, usdt_loan, me, abi.encode("flash loan"));
 
         // 3. Convert the profit into ETH and send back to sender
         //    *** Your code here ***
+        uint256 my_eth = IERC20(WETH).balanceOf(address(this));
+        IWETH(WETH).withdraw(my_eth);
+        msg.sender.call{value: my_eth}("");
 
-        // END TODO
+        // END DTODO
     }
 
     // required by the swap
@@ -224,9 +242,24 @@ contract LiquidationOperator is IUniswapV2Callee {
 
         // 2.1 liquidate the target user
         //    *** Your code here ***
+        // console.log("amount1: " + amount1);
+        IERC20(USDT).approve(aave_addr, amount1); // aave_addr = uniswap pair for ETH-USDT;
+        lending_pool.liquidationCall(WBTC, USDT, target_address, amount1, false);
 
         // 2.2 swap WBTC for other things or repay directly
         //    *** Your code here ***
+        wbtc_amnt = IERC20(WBTC).balanceOf(address(this));
+        IERC20(WBTC).approve(uniswp_factory.getPair(WETH, WBTC), wbtc_amnt);
+        IERC20(WBTC).transfer(uniswp_factory.getPair(WETH, WBTC), wbtc_amnt);
+
+        (uint wbtc_reserves, uint wetc_reserves, uint z) = uniswp_pair_weth_wbtc.getReserves();
+        uint weth_amnt = getAmountOut(wbtc_amnt, wbtc_reserves, wetc_reserves);
+        uniswp_pair_weth_wbtc.swap(0, weth_amnt, me, "");
+
+        (uint weth_reserves2, uint usdt_reserves, uint z2) = uniswp_pair_usdt_weth.getReserves();
+        uint weth_amnt2 = getAmountIn(usdt_loan, weth_reserves2, usdt_reserves);
+        IERC20(WETH).approve(uniswp_factory.getPair(WETH, USDT), weth_amnt2);
+        IERC20(WETH).transfer(uniswp_factory.getPair(WETH, USDT), weth_amnt2);
 
         // 2.3 repay
         //    *** Your code here ***
